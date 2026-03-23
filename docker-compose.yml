@@ -9,20 +9,44 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: rag-docqa-backend
-    ports:
-      - "8000:8000"
     environment:
+      - ENV=${ENV:-production}
+      - ALLOW_ANONYMOUS_ACCESS=${ALLOW_ANONYMOUS_ACCESS:-false}
+      - ENABLE_API_DOCS=${ENABLE_API_DOCS:-false}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-all-MiniLM-L6-v2}
       - VECTOR_STORE_PATH=/app/chroma_db
       - LLM_PROVIDER=${LLM_PROVIDER:-openai}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - LLM_MODEL=${LLM_MODEL:-gpt-3.5-turbo}
+      - API_KEY=${API_KEY:-}
+      - API_KEYS=${API_KEYS:-}
+      - AUTH_MODE=${AUTH_MODE:-jwt_or_api_key}
+      - JWT_JWKS_URL=${JWT_JWKS_URL:-}
+      - JWT_ISSUER=${JWT_ISSUER:-}
+      - JWT_AUDIENCE=${JWT_AUDIENCE:-}
+      - JWT_ALGORITHM=${JWT_ALGORITHM:-RS256}
+      - JWT_TENANT_CLAIM=${JWT_TENANT_CLAIM:-tenant_id}
+      - STATS_ALLOWED_ROLES=${STATS_ALLOWED_ROLES:-}
+      - STATS_ALLOW_API_KEY=${STATS_ALLOW_API_KEY:-true}
+      - AUDIT_LOG_ENABLED=${AUDIT_LOG_ENABLED:-true}
+      - ENABLE_METRICS=${ENABLE_METRICS:-true}
+      - METRICS_TOKEN=${METRICS_TOKEN:-}
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
+      - CORS_ALLOW_CREDENTIALS=${CORS_ALLOW_CREDENTIALS:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - MAX_UPLOAD_BYTES=${MAX_UPLOAD_BYTES:-10485760}
+      - RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED:-true}
+      - RATE_LIMIT_DEFAULT=${RATE_LIMIT_DEFAULT:-200/minute}
+      - RATE_LIMIT_UPLOAD=${RATE_LIMIT_UPLOAD:-20/hour}
+      - RATE_LIMIT_ASK=${RATE_LIMIT_ASK:-120/hour}
+      - RATE_LIMIT_READ=${RATE_LIMIT_READ:-600/hour}
     volumes:
       - ./backend/chroma_db:/app/chroma_db
-      - ./backend:/app
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -31,14 +55,19 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-/api}
+        VITE_API_KEY: ${VITE_API_KEY:-}
     container_name: rag-docqa-frontend
     ports:
-      - "3000:3000"
-    environment:
-      - VITE_API_URL=http://localhost:8000/api
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
+      - "127.0.0.1:3000:80"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       - backend
-    command: npm run dev -- --host
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

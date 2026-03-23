@@ -1,6 +1,7 @@
 """Document processing utilities for extracting text from various file formats."""
 
 import os
+import re
 from typing import List, Dict, Optional
 from pathlib import Path
 import PyPDF2
@@ -9,10 +10,15 @@ import markdown
 from io import BytesIO
 
 
+MAX_PDF_PAGES = int(os.getenv("MAX_PDF_PAGES", "500"))
+MAX_EXTRACTED_TEXT_CHARS = int(os.getenv("MAX_EXTRACTED_TEXT_CHARS", str(5_000_000)))
+
+
 class DocumentProcessor:
     """Processes documents in various formats and extracts text."""
     
-    SUPPORTED_EXTENSIONS = {'.pdf', '.docx', '.doc', '.md', '.txt', '.markdown'}
+    # .doc is legacy binary; only .docx is safely supported for Word
+    SUPPORTED_EXTENSIONS = {'.pdf', '.docx', '.md', '.txt', '.markdown'}
     
     @staticmethod
     def is_supported(filename: str) -> bool:
@@ -27,12 +33,15 @@ class DocumentProcessor:
         
         if ext == '.pdf':
             return DocumentProcessor._extract_from_pdf(file_content)
-        elif ext in ['.docx', '.doc']:
+        elif ext == '.docx':
             return DocumentProcessor._extract_from_docx(file_content)
         elif ext in ['.md', '.markdown']:
             return DocumentProcessor._extract_from_markdown(file_content)
         elif ext == '.txt':
-            return file_content.decode('utf-8')
+            raw = file_content.decode('utf-8', errors='replace')
+            if len(raw) > MAX_EXTRACTED_TEXT_CHARS:
+                return raw[:MAX_EXTRACTED_TEXT_CHARS]
+            return raw
         else:
             raise ValueError(f"Unsupported file type: {ext}")
     
@@ -41,9 +50,22 @@ class DocumentProcessor:
         """Extract text from PDF file."""
         pdf_file = BytesIO(content)
         pdf_reader = PyPDF2.PdfReader(pdf_file)
+        n_pages = len(pdf_reader.pages)
+        if n_pages > MAX_PDF_PAGES:
+            raise ValueError(
+                f"PDF has too many pages ({n_pages}); maximum allowed is {MAX_PDF_PAGES}"
+            )
         text = []
+        total_chars = 0
         for page in pdf_reader.pages:
-            text.append(page.extract_text())
+            chunk = page.extract_text() or ""
+            if total_chars + len(chunk) > MAX_EXTRACTED_TEXT_CHARS:
+                allowed = MAX_EXTRACTED_TEXT_CHARS - total_chars
+                if allowed > 0:
+                    text.append(chunk[:allowed])
+                break
+            text.append(chunk)
+            total_chars += len(chunk)
         return '\n'.join(text)
     
     @staticmethod
@@ -52,16 +74,20 @@ class DocumentProcessor:
         doc_file = BytesIO(content)
         doc = docx.Document(doc_file)
         paragraphs = [para.text for para in doc.paragraphs]
-        return '\n'.join(paragraphs)
+        out = '\n'.join(paragraphs)
+        if len(out) > MAX_EXTRACTED_TEXT_CHARS:
+            return out[:MAX_EXTRACTED_TEXT_CHARS]
+        return out
     
     @staticmethod
     def _extract_from_markdown(content: bytes) -> str:
         """Extract text from Markdown file."""
         md_text = content.decode('utf-8')
+        if len(md_text) > MAX_EXTRACTED_TEXT_CHARS:
+            md_text = md_text[:MAX_EXTRACTED_TEXT_CHARS]
         # Convert markdown to plain text (remove formatting)
         html = markdown.markdown(md_text)
         # Simple HTML tag removal (for basic markdown)
-        import re
         text = re.sub(r'<[^>]+>', '', html)
         return text
     

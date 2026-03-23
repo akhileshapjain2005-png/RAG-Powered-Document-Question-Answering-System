@@ -24,6 +24,8 @@ An intelligent document question-answering system built with RAG (Retrieval-Augm
 - [Usage](#usage)
 - [API Documentation](#api-documentation)
 - [Deployment](#deployment)
+- [Enterprise](#enterprise-hardening)
+- [Security](SECURITY.md)
 - [Development](#development)
 - [Future Improvements](#future-improvements)
 
@@ -129,8 +131,8 @@ docker-compose up -d
 
 4. Access the application:
 - Frontend: http://localhost:3000
-- Backend API: http://localhost:8000
-- API Docs: http://localhost:8000/docs
+- Backend API (proxied): http://localhost:3000/api
+- API Docs: http://localhost:3000/api/docs
 
 ### Option 2: Local Development
 
@@ -191,11 +193,32 @@ npm run dev
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `OPENAI_API_KEY` | OpenAI API key for LLM | Required |
+| `ENV` | Runtime environment name (`development`, `production`, etc.) | `development` locally; `production` in compose |
+| `ENABLE_API_DOCS` | Expose `/docs`, `/redoc`, `/openapi.json` | `false` in production by default |
 | `LLM_PROVIDER` | LLM provider: `openai` or `local` | `openai` |
 | `LLM_MODEL` | Model name (e.g., `gpt-3.5-turbo`) | `gpt-3.5-turbo` |
 | `EMBEDDING_MODEL` | Embedding model name | `all-MiniLM-L6-v2` |
 | `VECTOR_STORE_PATH` | Path to ChromaDB storage | `./chroma_db` |
-| `VITE_API_URL` | Backend API URL for frontend | `http://localhost:8000/api` |
+| `VITE_API_URL` | Backend API URL for frontend | `/api` (recommended behind nginx) |
+| `API_KEY` | Optional API key required for protected backend endpoints | Empty (disabled) |
+| `API_KEYS` | Optional comma-separated additional API keys | Empty |
+| `API_KEY_HEADER_NAME` | Header used for API key auth | `X-API-Key` |
+| `MAX_UPLOAD_BYTES` | Max upload size in bytes | `10485760` (10MB) |
+| `CORS_ALLOWED_ORIGINS` | Comma-separated frontend origins | `http://localhost:3000` |
+| `RATE_LIMIT_ENABLED` | Enable API rate limiting | `true` |
+| `RATE_LIMIT_DEFAULT` | Default limiter | `200/minute` |
+| `RATE_LIMIT_UPLOAD` | Upload endpoint limit | `20/hour` |
+| `RATE_LIMIT_ASK` | Ask endpoints limit | `120/hour` |
+| `RATE_LIMIT_READ` | Read endpoints limit | `600/hour` |
+| `AUTH_MODE` | `anonymous`, `api_key`, `jwt`, `jwt_or_api_key` | `jwt_or_api_key` |
+| `JWT_JWKS_URL` | OIDC JWKS URL (Auth0/Azure AD/Okta/Keycloak) | Empty |
+| `JWT_ISSUER` / `JWT_AUDIENCE` | Optional JWT validation | Empty |
+| `STATS_ALLOWED_ROLES` | Comma-separated roles allowed to call `GET /stats` | Empty (any authenticated caller) |
+| `ENABLE_METRICS` | Expose Prometheus metrics at `GET /metrics` | `true` |
+
+### Enterprise hardening
+
+For SSO/OIDC, tenant claims, RBAC on stats, audit JSON logs, and Prometheus metrics, see **[ENTERPRISE.md](ENTERPRISE.md)**.
 
 ### Supported File Types
 
@@ -251,19 +274,22 @@ npm run dev
 - `GET /api/stats` - Get system statistics
 - `GET /api/health` - Health check
 
+**Note:** The stable HTTP contract is **`/api/v1/*`**. The UI and nginx dev/proxy setup call **`/api/*`**, which is rewritten to **`/api/v1/*`**.
+
 ### Example API Calls
 
 #### Upload Document
 ```bash
-curl -X POST "http://localhost:8000/api/documents/upload" \
+curl -X POST "http://localhost:3000/api/documents/upload" \
   -H "Content-Type: multipart/form-data" \
   -F "file=@document.pdf"
 ```
 
 #### Ask Question
 ```bash
-curl -X POST "http://localhost:8000/api/ask" \
+curl -X POST "http://localhost:3000/api/ask" \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: <your_api_key_if_enabled>" \
   -d '{
     "question": "What is this document about?",
     "top_k": 5
@@ -272,10 +298,10 @@ curl -X POST "http://localhost:8000/api/ask" \
 
 #### Get Statistics
 ```bash
-curl "http://localhost:8000/api/stats"
+curl "http://localhost:3000/api/stats"
 ```
 
-Full API documentation available at http://localhost:8000/docs (Swagger UI)
+API documentation is available at http://localhost:3000/api/docs when `ENABLE_API_DOCS=true` (disabled by default in the provided compose file).
 
 ## 🚢 Deployment
 
@@ -290,6 +316,12 @@ docker-compose build
 ```bash
 # Edit docker-compose.yml or use .env file
 ```
+
+**Recommended production settings**
+- Set `API_KEY` (and optionally `API_KEYS`) so the API is not anonymously accessible.
+- Set `ENV=production` and keep `ENABLE_API_DOCS=false` unless you explicitly want Swagger exposed.
+- Keep `CORS_ALLOWED_ORIGINS` limited to your real frontend origin(s).
+- Prefer same-origin API calls (`VITE_API_URL=/api`) and avoid baking secrets into the frontend bundle.
 
 3. **Run in production mode**:
 ```bash
@@ -369,7 +401,7 @@ npm test
 ## 🔮 Future Improvements
 
 ### Short-term
-- [ ] Add user authentication and multi-user support
+- [ ] Add user authentication and multi-user support (API key tenant isolation is implemented; user accounts are not)
 - [ ] Implement document versioning
 - [ ] Add support for more file types (Excel, PowerPoint)
 - [ ] Improve chunking strategies (semantic chunking)
@@ -382,7 +414,7 @@ npm test
 - [ ] Advanced RAG techniques (re-ranking, query expansion)
 - [ ] Export conversations to PDF/Markdown
 - [ ] Batch document processing
-- [ ] API rate limiting and authentication
+- [x] API rate limiting and API-key authentication
 
 ### Long-term
 - [ ] Multi-modal support (images, tables in documents)

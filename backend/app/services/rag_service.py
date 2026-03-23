@@ -43,7 +43,8 @@ class RAGService:
         self,
         file_content: bytes,
         filename: str,
-        document_id: Optional[str] = None
+        document_id: Optional[str] = None,
+        owner_id: str = "anonymous",
     ) -> Dict:
         """
         Process a document and store it in the vector database.
@@ -80,6 +81,7 @@ class RAGService:
             metadata = chunk['metadata'].copy()
             metadata.update({
                 'document_id': document_id,
+                'owner_id': owner_id,
                 'filename': filename,
                 'uploaded_at': datetime.utcnow().isoformat()
             })
@@ -97,6 +99,7 @@ class RAGService:
         # Store document metadata
         self.documents[document_id] = {
             'id': document_id,
+            'owner_id': owner_id,
             'filename': filename,
             'uploaded_at': datetime.utcnow().isoformat(),
             'chunk_count': len(chunks),
@@ -110,7 +113,8 @@ class RAGService:
         question: str,
         document_ids: Optional[List[str]] = None,
         top_k: int = 5,
-        conversation_history: Optional[List[Dict[str, str]]] = None
+        conversation_history: Optional[List[Dict[str, str]]] = None,
+        owner_id: str = "anonymous",
     ) -> Dict:
         """
         Answer a question using RAG.
@@ -128,9 +132,42 @@ class RAGService:
         query_embedding = self.embedding_model.encode(question)
         
         # Build filter if document_ids provided
-        filter_metadata = None
         if document_ids:
-            filter_metadata = {"document_id": {"$in": document_ids}}
+            owned_doc_ids = [
+                doc_id
+                for doc_id in document_ids
+                if doc_id in self.documents and self.documents[doc_id].get("owner_id") == owner_id
+            ]
+            if not owned_doc_ids:
+                return {
+                    'answer': "I couldn't find any relevant information in the documents to answer your question.",
+                    'sources': [],
+                    'metadata': {'chunks_retrieved': 0}
+                }
+            filter_metadata = {
+                "$and": [
+                    {"owner_id": owner_id},
+                    {"document_id": {"$in": owned_doc_ids}},
+                ]
+            }
+        else:
+            owned_doc_ids = [
+                doc_id
+                for doc_id, doc in self.documents.items()
+                if doc.get("owner_id") == owner_id
+            ]
+            if not owned_doc_ids:
+                return {
+                    'answer': "I couldn't find any relevant information in the documents to answer your question.",
+                    'sources': [],
+                    'metadata': {'chunks_retrieved': 0}
+                }
+            filter_metadata = {
+                "$and": [
+                    {"owner_id": owner_id},
+                    {"document_id": {"$in": owned_doc_ids}},
+                ]
+            }
         
         # Search for relevant chunks
         relevant_chunks = self.vector_store.search(
@@ -196,7 +233,8 @@ class RAGService:
         question: str,
         document_ids: Optional[List[str]] = None,
         top_k: int = 5,
-        conversation_history: Optional[List[Dict[str, str]]] = None
+        conversation_history: Optional[List[Dict[str, str]]] = None,
+        owner_id: str = "anonymous",
     ) -> AsyncIterator[str]:
         """
         Stream answer tokens.
@@ -214,9 +252,36 @@ class RAGService:
         query_embedding = self.embedding_model.encode(question)
         
         # Build filter if document_ids provided
-        filter_metadata = None
         if document_ids:
-            filter_metadata = {"document_id": {"$in": document_ids}}
+            owned_doc_ids = [
+                doc_id
+                for doc_id in document_ids
+                if doc_id in self.documents and self.documents[doc_id].get("owner_id") == owner_id
+            ]
+            if not owned_doc_ids:
+                yield "I couldn't find any relevant information in the documents to answer your question."
+                return
+            filter_metadata = {
+                "$and": [
+                    {"owner_id": owner_id},
+                    {"document_id": {"$in": owned_doc_ids}},
+                ]
+            }
+        else:
+            owned_doc_ids = [
+                doc_id
+                for doc_id, doc in self.documents.items()
+                if doc.get("owner_id") == owner_id
+            ]
+            if not owned_doc_ids:
+                yield "I couldn't find any relevant information in the documents to answer your question."
+                return
+            filter_metadata = {
+                "$and": [
+                    {"owner_id": owner_id},
+                    {"document_id": {"$in": owned_doc_ids}},
+                ]
+            }
         
         # Search for relevant chunks
         relevant_chunks = self.vector_store.search(
@@ -247,15 +312,22 @@ class RAGService:
         ):
             yield token
     
-    def get_documents(self) -> List[Dict]:
+    def get_documents(self, owner_id: str = "anonymous") -> List[Dict]:
         """Get list of all uploaded documents."""
-        return list(self.documents.values())
+        return [
+            {k: v for k, v in doc.items() if k != "owner_id"}
+            for doc in self.documents.values()
+            if doc.get("owner_id") == owner_id
+        ]
     
-    def get_document(self, document_id: str) -> Optional[Dict]:
+    def get_document(self, document_id: str, owner_id: str = "anonymous") -> Optional[Dict]:
         """Get a specific document by ID."""
-        return self.documents.get(document_id)
+        doc = self.documents.get(document_id)
+        if not doc or doc.get("owner_id") != owner_id:
+            return None
+        return {k: v for k, v in doc.items() if k != "owner_id"}
     
-    def delete_document(self, document_id: str) -> bool:
+    def delete_document(self, document_id: str, owner_id: str = "anonymous") -> bool:
         """
         Delete a document and all its chunks.
         
@@ -267,21 +339,32 @@ class RAGService:
         """
         if document_id not in self.documents:
             return False
+        if self.documents[document_id].get("owner_id") != owner_id:
+            return False
         
         # Delete from vector store
-        self.vector_store.delete_documents(filter_metadata={"document_id": document_id})
+        self.vector_store.delete_documents(
+            filter_metadata={
+                "$and": [
+                    {"document_id": document_id},
+                    {"owner_id": owner_id},
+                ]
+            }
+        )
         
         # Remove from documents dict
         del self.documents[document_id]
         
         return True
     
-    def get_stats(self) -> Dict:
+    def get_stats(self, owner_id: str = "anonymous") -> Dict:
         """Get service statistics."""
-        vector_stats = self.vector_store.get_collection_stats()
+        user_document_count = len(
+            [doc for doc in self.documents.values() if doc.get("owner_id") == owner_id]
+        )
         return {
-            'total_documents': len(self.documents),
-            'vector_store_documents': vector_stats['total_documents'],
+            'total_documents': user_document_count,
+            'vector_store_documents': user_document_count,
             'embedding_model': self.embedding_model.model_name,
             'embedding_dimension': self.embedding_model.embedding_dim
         }

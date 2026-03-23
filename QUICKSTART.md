@@ -43,13 +43,15 @@ Frontend will run on http://localhost:3000
 ## Docker Quick Start
 
 ```bash
-# Create .env file
-echo "OPENAI_API_KEY=your_api_key_here" > .env
+# Create .env file from template
+cp .env.example .env
+# Edit .env and set OPENAI_API_KEY (and optional API_KEY)
 
 # Start services
 docker-compose up -d
 
 # Access at http://localhost:3000
+# API is available at http://localhost:3000/api (nginx proxies to backend)
 ```
 
 ## Example Questions
@@ -78,5 +80,5 @@ docker-compose up -d
 ## Next Steps
 
 - Read the full [README.md](README.md) for detailed documentation
-- Check out [API documentation](http://localhost:8000/docs) when backend is running
+- Check out [API documentation](http://localhost:3000/api/docs) when using Docker Compose
 - Explore the code structure in `backend/app/` and `frontend/src/`
