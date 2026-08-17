@@ -61,21 +61,32 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
         request.state.request_id = request_id
+
         start = time.perf_counter()
         response: Response = await call_next(request)
         duration_ms = int((time.perf_counter() - start) * 1000)
-        response.headers["X-Request-ID"] = request_id
+
+        response.headers.setdefault("X-Request-ID", request_id)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
-        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-        response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-        # CSP is for HTML documents; JSON APIs should not send restrictive CSP (noise / tooling issues).
+        response.headers.setdefault(
+            "Referrer-Policy",
+            "strict-origin-when-cross-origin",
+        )
+        response.headers.setdefault(
+            "Permissions-Policy",
+            "camera=(), microphone=(), geolocation=()",
+        )
+
         path = request.url.path
-        if not path.startswith("/api") and path != "/metrics":
+
+        # Do not apply the restrictive CSP to the documentation pages.
+        if path not in ["/docs", "/redoc", "/openapi.json"]:
             response.headers.setdefault(
                 "Content-Security-Policy",
                 "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
             )
+
         logging.getLogger("app.request").info(
             "%s %s -> %s (%sms)",
             request.method,
@@ -84,9 +95,8 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
             duration_ms,
             extra={"request_id": request_id},
         )
+
         return response
-
-
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
@@ -141,6 +151,6 @@ async def root():
         "message": "RAG-DocQA: AI-Powered Document Question Answering System API",
         "version": "1.0.0",
         "api": "/api/v1",
-        "docs": "/api/v1/docs" if docs_enabled else None,
+        "docs": "/docs" if docs_enabled else None,
         "metrics": "/metrics" if os.getenv("ENABLE_METRICS", "true").lower() == "true" else None,
     }

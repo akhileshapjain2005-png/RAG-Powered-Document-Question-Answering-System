@@ -28,11 +28,11 @@ RATE_LIMIT_READ = os.getenv("RATE_LIMIT_READ", "600/hour")
 rag_service = RAGService(
     embedding_model_name=os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2"),
     vector_store_path=os.getenv("VECTOR_STORE_PATH", "./chroma_db"),
-    llm_provider=os.getenv("LLM_PROVIDER", "openai"),
+    llm_provider=os.getenv("LLM_PROVIDER", "ollama"),
     llm_kwargs={
-        "api_key": os.getenv("OPENAI_API_KEY"),
-        "model": os.getenv("LLM_MODEL", "gpt-3.5-turbo")
-    } if os.getenv("LLM_PROVIDER", "openai") == "openai" else {}
+        "model": os.getenv("LLM_MODEL", "llama3.2"),
+        "base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+    }
 )
 
 router = APIRouter()
@@ -89,7 +89,7 @@ def _public_error_message(exc: Exception) -> str:
 
 
 @router.post("/documents/upload", response_model=DocumentResponse)
-@limiter.limit(RATE_LIMIT_UPLOAD)
+#@limiter.limit(RATE_LIMIT_UPLOAD)
 async def upload_document(
     request: Request,
     file: UploadFile = File(...),
@@ -151,7 +151,7 @@ async def upload_document(
 
 
 @router.get("/documents", response_model=List[DocumentResponse])
-@limiter.limit(RATE_LIMIT_READ)
+#@limiter.limit(RATE_LIMIT_READ)
 async def list_documents(
     _request: Request,
     ctx: SecurityContext = Depends(get_security_context),
@@ -162,7 +162,7 @@ async def list_documents(
 
 
 @router.get("/documents/{document_id}", response_model=DocumentResponse)
-@limiter.limit(RATE_LIMIT_READ)
+#@limiter.limit(RATE_LIMIT_READ)
 async def get_document(
     _request: Request,
     document_id: str,
@@ -176,7 +176,7 @@ async def get_document(
 
 
 @router.delete("/documents/{document_id}")
-@limiter.limit(RATE_LIMIT_READ)
+#@limiter.limit(RATE_LIMIT_READ)
 async def delete_document(
     request: Request,
     document_id: str,
@@ -233,7 +233,7 @@ async def ask_question(
 
 
 @router.post("/ask/stream")
-@limiter.limit(RATE_LIMIT_ASK)
+#@limiter.limit(RATE_LIMIT_ASK)
 async def ask_question_stream(
     request: Request,
     body: QuestionRequest,
@@ -279,7 +279,7 @@ async def ask_question_stream(
 
 
 @router.get("/stats", response_model=StatsResponse)
-@limiter.limit(RATE_LIMIT_READ)
+#@limiter.limit(RATE_LIMIT_READ)
 async def get_stats(
     request: Request,
     ctx: SecurityContext = Depends(require_stats_role),

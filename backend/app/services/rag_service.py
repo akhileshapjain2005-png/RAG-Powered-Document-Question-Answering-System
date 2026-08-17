@@ -17,7 +17,7 @@ class RAGService:
         self,
         embedding_model_name: str = "all-MiniLM-L6-v2",
         vector_store_path: str = "./chroma_db",
-        llm_provider: str = "openai",
+        llm_provider: str = "ollama",
         llm_kwargs: Optional[Dict] = None
     ):
         """
@@ -34,7 +34,11 @@ class RAGService:
         self.document_processor = DocumentProcessor()
         
         llm_kwargs = llm_kwargs or {}
-        self.llm_service = get_llm_service(provider=llm_provider, **llm_kwargs)
+        self.llm_service = get_llm_service(
+    provider="ollama",
+    model="llama3.2",
+    base_url="http://localhost:11434"
+)
         
         # Store document metadata
         self.documents: Dict[str, Dict] = {}
