@@ -4,8 +4,8 @@ LLM Service using Ollama
 
 from typing import List, Dict, Optional, AsyncIterator
 from abc import ABC, abstractmethod
-import requests
 import json
+import httpx
 
 
 class LLMService(ABC):
@@ -33,40 +33,51 @@ class OllamaService(LLMService):
 
     def __init__(
         self,
-        model: str = "llama3.2",
+        model: str = "llama3.2:latest",
         base_url: str = "http://localhost:11434"
     ):
         self.model = model
-        self.base_url = base_url
+        self.base_url = base_url.rstrip("/")
 
-    def build_prompt(self, query, context):
+    def build_prompt(
+        self,
+        query: str,
+        context: List[Dict[str, str]],
+        conversation_history: Optional[List[Dict[str, str]]] = None
+    ) -> str:
 
         context_text = "\n\n".join(
-            [
-                f"[Document {i+1}]\n{doc.get('text', '')}"
-                for i, doc in enumerate(context)
-            ]
+            f"[Document {i + 1}]\n{doc.get('text', '')}"
+            for i, doc in enumerate(context)
+            if doc.get("text")
         )
 
-        return f"""
-You are a helpful AI assistant.
+        history_text = ""
+        if conversation_history:
+            history_text = "\n\nConversation history:\n" + "\n".join(
+                f"{message.get('role', 'user')}: "
+                f"{message.get('content', message.get('text', ''))}"
+                for message in conversation_history
+            )
 
-Answer ONLY using the provided context.
+        if not context_text.strip():
+            context_text = "(No relevant document context was retrieved.)"
 
-If the answer is not present in the context, reply:
+        return f"""You are a helpful document question-answering assistant.
 
-I don't have enough information.
+Answer the question using only the provided document context.
+Do not invent facts or use outside knowledge.
+If the answer is not available in the context, say:
+"I don't have enough information."
 
-Context:
-
+Document context:
 {context_text}
+{history_text}
 
 Question:
-
 {query}
 
-Answer:
-"""
+Answer:"""
 
     async def generate_response(
         self,
@@ -75,21 +86,23 @@ Answer:
         conversation_history: Optional[List[Dict[str, str]]] = None
     ) -> str:
 
-        prompt = self.build_prompt(query, context)
-
-        response = requests.post(
-            f"{self.base_url}/api/generate",
-            json={
-                "model": self.model,
-                "prompt": prompt,
-                "stream": False
-            },
-            timeout=300
+        prompt = self.build_prompt(
+            query, context, conversation_history
         )
 
-        response.raise_for_status()
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            response = await client.post(
+                f"{self.base_url}/api/generate",
+                json={
+                    "model": self.model,
+                    "prompt": prompt,
+                    "stream": False
+                }
+            )
+            response.raise_for_status()
+            data = response.json()
 
-        return response.json()["response"]
+        return data.get("response", "").strip()
 
     async def stream_response(
         self,
@@ -98,34 +111,36 @@ Answer:
         conversation_history: Optional[List[Dict[str, str]]] = None
     ) -> AsyncIterator[str]:
 
-        prompt = self.build_prompt(query, context)
-
-        response = requests.post(
-            f"{self.base_url}/api/generate",
-            json={
-                "model": self.model,
-                "prompt": prompt,
-                "stream": True
-            },
-            stream=True,
-            timeout=300
+        prompt = self.build_prompt(
+            query, context, conversation_history
         )
 
-        response.raise_for_status()
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            async with client.stream(
+                "POST",
+                f"{self.base_url}/api/generate",
+                json={
+                    "model": self.model,
+                    "prompt": prompt,
+                    "stream": True
+                }
+            ) as response:
+                response.raise_for_status()
 
-        for line in response.iter_lines():
+                async for line in response.aiter_lines():
+                    if not line:
+                        continue
 
-            if not line:
-                continue
+                    try:
+                        chunk = json.loads(line)
+                        text = chunk.get("response", "")
+                        if text:
+                            yield text
 
-            try:
-                chunk = json.loads(line.decode())
-
-                if "response" in chunk:
-                    yield chunk["response"]
-
-            except Exception:
-                continue
+                        if chunk.get("done", False):
+                            break
+                    except json.JSONDecodeError:
+                        continue
 
 
 def get_llm_service(
@@ -137,7 +152,7 @@ def get_llm_service(
 
     if provider in ["ollama", "local"]:
         return OllamaService(
-            model=kwargs.get("model", "llama3.2"),
+            model=kwargs.get("model", "llama3.2:latest"),
             base_url=kwargs.get(
                 "base_url",
                 "http://localhost:11434"

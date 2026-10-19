@@ -1,13 +1,13 @@
 # RAG-DocQA: AI-Powered Document Question Answering System
 
-An intelligent document question-answering system built with RAG (Retrieval-Augmented Generation) architecture. Upload documents, ask questions, and get AI-powered answers with source citations. Built with FastAPI, React, ChromaDB, and OpenAI.
+An intelligent document question-answering system built with RAG (Retrieval-Augmented Generation) architecture. Upload documents, ask questions, and get AI-powered answers with source citations. Built with FastAPI, React, ChromaDB, Sentence Transformers, and Ollama for local LLM inference.
 
 ## 🚀 Features
 
 - **Document Processing**: Support for PDF, DOCX, Markdown, and TXT files
 - **Intelligent Chunking**: Automatic text chunking with overlap for better context
 - **Vector Search**: Semantic search using embeddings and ChromaDB
-- **LLM Integration**: Support for OpenAI and local LLM models
+- **LLM Integration**: Local language-model inference through Ollama
 - **Streaming Responses**: Real-time streaming of AI responses
 - **Source Citations**: Track which documents and chunks were used for answers
 - **Modern UI**: Beautiful, responsive React frontend
@@ -65,7 +65,7 @@ The system follows a RAG (Retrieval-Augmented Generation) architecture:
               ▼
        ┌──────────────┐
        │  LLM Service │
-       │ (OpenAI/Local)│
+       │   (Ollama)   │
        └──────────────┘
 ```
 
@@ -89,7 +89,7 @@ The system follows a RAG (Retrieval-Augmented Generation) architecture:
 - **ChromaDB**: Vector database for similarity search
 - **PyPDF2**: PDF text extraction
 - **python-docx**: DOCX text extraction
-- **OpenAI API**: LLM integration (optional: local models)
+- **Ollama**: Local LLM runtime for answer generation
 
 ### Frontend
 - **React**: UI framework
@@ -106,7 +106,9 @@ The system follows a RAG (Retrieval-Augmented Generation) architecture:
 - Python 3.11+
 - Node.js 18+
 - Docker and Docker Compose (optional, for containerized deployment)
-- OpenAI API key (if using OpenAI LLM)
+- Ollama installed and running (https://ollama.com/download)
+
+Ollama runs the language model on your computer. After downloading the model, inference can run locally; internet access is needed for initial model downloads and updates.
 
 ## 🔧 Installation
 
@@ -118,11 +120,7 @@ git clone <repository-url>
 cd portproj
 ```
 
-2. Create a `.env` file:
-```bash
-cp .env.example .env
-# Edit .env and add your OPENAI_API_KEY
-```
+2. Create or update your `.env` file with the Ollama settings shown in the Configuration section. Do not add an OpenAI key when using Ollama.
 
 3. Start the services:
 ```bash
@@ -146,7 +144,8 @@ cd backend
 2. Create virtual environment:
 ```bash
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate  # macOS/Linux
+# Windows PowerShell (if venv is in the repository root): ..\venv\Scripts\Activate.ps1
 ```
 
 3. Install dependencies:
@@ -154,13 +153,22 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-4. Set environment variables:
-```bash
-export OPENAI_API_KEY=your_api_key_here
-export LLM_PROVIDER=openai
-export LLM_MODEL=gpt-3.5-turbo
-export EMBEDDING_MODEL=all-MiniLM-L6-v2
+4. Configure `backend/.env` with the local Ollama settings:
+```env
+LLM_PROVIDER=ollama
+LLM_MODEL=llama3.2:latest
+OLLAMA_BASE_URL=http://localhost:11434
+EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+VECTOR_STORE_PATH=./vector_store
 ```
+
+Download the model and verify it is available:
+```powershell
+ollama pull llama3.2:latest
+ollama list
+```
+
+Keep Ollama running while the application is in use. Ensure the backend loads the `.env` file and passes these settings to the LLM service.
 
 5. Run the server:
 ```bash
@@ -192,13 +200,13 @@ npm run dev
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `OPENAI_API_KEY` | OpenAI API key for LLM | Required |
 | `ENV` | Runtime environment name (`development`, `production`, etc.) | `development` locally; `production` in compose |
 | `ENABLE_API_DOCS` | Expose `/docs`, `/redoc`, `/openapi.json` | `false` in production by default |
-| `LLM_PROVIDER` | LLM provider: `openai` or `local` | `openai` |
-| `LLM_MODEL` | Model name (e.g., `gpt-3.5-turbo`) | `gpt-3.5-turbo` |
-| `EMBEDDING_MODEL` | Embedding model name | `all-MiniLM-L6-v2` |
-| `VECTOR_STORE_PATH` | Path to ChromaDB storage | `./chroma_db` |
+| `LLM_PROVIDER` | LLM provider | `ollama` |
+| `LLM_MODEL` | Ollama model name | `llama3.2:latest` |
+| `OLLAMA_BASE_URL` | Ollama HTTP API URL | `http://localhost:11434` |
+| `EMBEDDING_MODEL` | Embedding model name | `sentence-transformers/all-MiniLM-L6-v2` |
+| `VECTOR_STORE_PATH` | Path to ChromaDB storage | `./vector_store` (match this to the path used by your code) |
 | `VITE_API_URL` | Backend API URL for frontend | `/api` (recommended behind nginx) |
 | `API_KEY` | Optional API key required for protected backend endpoints | Empty (disabled) |
 | `API_KEYS` | Optional comma-separated additional API keys | Empty |
@@ -219,6 +227,28 @@ npm run dev
 ### Enterprise hardening
 
 For SSO/OIDC, tenant claims, RBAC on stats, audit JSON logs, and Prometheus metrics, see **[ENTERPRISE.md](ENTERPRISE.md)**.
+
+### Ollama (Local LLM) Setup
+
+Install Ollama from <https://ollama.com/download>, then run:
+
+```powershell
+ollama pull llama3.2:latest
+ollama list
+ollama run llama3.2:latest
+```
+
+Type a test prompt to confirm the model responds, then enter `/bye` to exit. Ollama's default local API URL is `http://localhost:11434`.
+
+For local development, set these values in `backend/.env`:
+
+```env
+LLM_PROVIDER=ollama
+LLM_MODEL=llama3.2:latest
+OLLAMA_BASE_URL=http://localhost:11434
+```
+
+The backend's LLM service must support the `ollama` provider and read these settings at startup. When the backend runs inside Docker, `localhost` points to the backend container, not the host machine; configure the Ollama host address and Docker networking accordingly.
 
 ### Supported File Types
 
@@ -295,6 +325,8 @@ curl -X POST "http://localhost:3000/api/ask" \
     "top_k": 5
   }'
 ```
+
+**Tip:** For `/api/ask`, use the real document UUID returned by the upload endpoint in `document_ids`. Leaving the Swagger placeholder value `"string"` will fail UUID validation with `422 Unprocessable Entity`.
 
 #### Get Statistics
 ```bash
@@ -428,7 +460,7 @@ npm test
 
 - **Embedding Generation**: ~100-200ms per chunk (CPU)
 - **Vector Search**: ~10-50ms for top-5 results
-- **LLM Response**: ~1-3s (OpenAI GPT-3.5-turbo)
+- **LLM Response**: Depends on the Ollama model, prompt/context length, and available hardware
 - **Document Processing**: ~1-5s per document (depends on size)
 
 ## 🤝 Contributing
@@ -441,7 +473,7 @@ npm test
 
 ## 🔍 Keywords & Search Terms
 
-**RAG**, **Retrieval-Augmented Generation**, **Document Q&A**, **Document Question Answering**, **AI Document Assistant**, **LLM Integration**, **Vector Database**, **ChromaDB**, **FastAPI**, **React**, **OpenAI**, **Embeddings**, **Semantic Search**, **Document Processing**, **PDF Q&A**, **Document Chatbot**, **RAG Implementation**, **AI-Powered Search**, **Document Intelligence**, **Natural Language Processing**, **NLP**, **Machine Learning**, **ML Portfolio Project**
+**RAG**, **Retrieval-Augmented Generation**, **Document Q&A**, **Document Question Answering**, **AI Document Assistant**, **LLM Integration**, **Ollama**, **Vector Database**, **ChromaDB**, **FastAPI**, **React**, **Embeddings**, **Semantic Search**, **Document Processing**, **PDF Q&A**, **Document Chatbot**, **RAG Implementation**, **AI-Powered Search**, **Document Intelligence**, **Natural Language Processing**, **NLP**, **Machine Learning**, **ML Portfolio Project**
 
 ## 📝 License
 
@@ -458,5 +490,3 @@ This project is open source and available under the MIT License.
 ---
 
 **Note**: This is a portfolio project demonstrating RAG architecture, full-stack development, and ML integration. For production use, consider additional security, scalability, and monitoring features.
-
-
