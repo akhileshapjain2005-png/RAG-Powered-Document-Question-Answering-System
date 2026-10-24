@@ -1,21 +1,71 @@
-__pycache__
-*.pyc
+# Python cache files
+__pycache__/
+*.py[cod]
 *.pyo
 *.pyd
 .Python
 *.so
+
+# Python packages and build artifacts
 *.egg
-*.egg-info
-dist
-build
-.env
-.venv
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
 venv/
 ENV/
-node_modules
-.git
+env/
+
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+
+# Node.js dependencies
+node_modules/
+**/node_modules/
+
+# Vite cache and generated files
+.vite/
+**/.vite/
+dist-ssr/
+
+# Git files
+.git/
 .gitignore
+
+# Markdown files
 *.md
-.chroma_db
+
+# ChromaDB vector database
+.chroma_db/
 chroma_db/
+
+# Log files
 *.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Operating system files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Test and coverage output
+coverage/
+.nyc_output/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.local

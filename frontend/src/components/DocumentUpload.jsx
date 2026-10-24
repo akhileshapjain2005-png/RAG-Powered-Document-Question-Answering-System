@@ -1,107 +1,266 @@
-import React, { useState } from 'react';
-import './DocumentUpload.css';
+import React, { useRef, useState } from "react";
+import "./DocumentUpload.css";
+
+const ACCEPTED_EXTENSIONS = [
+  ".pdf",
+  ".docx",
+  ".doc",
+  ".md",
+  ".txt",
+  ".markdown",
+];
 
 function DocumentUpload({ onUpload }) {
+  const inputRef = useRef(null);
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [fileName, setFileName] = useState("");
+  const [fileSize, setFileSize] = useState("");
   const [message, setMessage] = useState(null);
 
-  const handleDragOver = (e) => {
-    e.preventDefault();
-    setDragging(true);
-  };
-
-  const handleDragLeave = (e) => {
-    e.preventDefault();
-    setDragging(false);
-  };
-
-  const handleDrop = async (e) => {
-    e.preventDefault();
-    setDragging(false);
-
-    const files = Array.from(e.dataTransfer.files);
-    if (files.length > 0) {
-      await uploadFile(files[0]);
-    }
-  };
-
-  const handleFileSelect = async (e) => {
-    const files = Array.from(e.target.files);
-    if (files.length > 0) {
-      await uploadFile(files[0]);
-    }
+  const formatSize = (bytes) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
   };
 
   const uploadFile = async (file) => {
-    // Validate file type
-    const validExtensions = ['.pdf', '.docx', '.doc', '.md', '.txt', '.markdown'];
-    const fileExtension = '.' + file.name.split('.').pop().toLowerCase();
-    
-    if (!validExtensions.includes(fileExtension)) {
-      setMessage({ type: 'error', text: 'Unsupported file type. Please upload PDF, DOCX, Markdown, or TXT files.' });
-      setTimeout(() => setMessage(null), 5000);
+    if (!file || uploading) return;
+
+    const extension = `.${file.name.split(".").pop().toLowerCase()}`;
+
+    if (!ACCEPTED_EXTENSIONS.includes(extension)) {
+      setMessage({
+        type: "error",
+        text: "Unsupported format. Choose PDF, DOCX, DOC, MD or TXT.",
+      });
       return;
     }
 
-    setUploading(true);
+    setFileName(file.name);
+    setFileSize(formatSize(file.size));
     setMessage(null);
+    setUploading(true);
 
     try {
       const result = await onUpload(file);
-      if (result.success) {
-        setMessage({ type: 'success', text: `Document "${file.name}" uploaded successfully!` });
-        setTimeout(() => setMessage(null), 3000);
+
+      if (result?.success) {
+        setMessage({
+          type: "success",
+          text: "Your document has been added to the knowledge base.",
+        });
       } else {
-        setMessage({ type: 'error', text: result.error || 'Upload failed' });
-        setTimeout(() => setMessage(null), 5000);
+        setMessage({
+          type: "error",
+          text:
+            result?.message ||
+            result?.error ||
+            "Upload failed. Please try again.",
+        });
       }
     } catch (error) {
-      setMessage({ type: 'error', text: 'Error uploading file: ' + error.message });
-      setTimeout(() => setMessage(null), 5000);
+      setMessage({
+        type: "error",
+        text:
+          error?.response?.data?.detail ||
+          error?.message ||
+          "Upload failed. Please try again.",
+      });
     } finally {
       setUploading(false);
+      if (inputRef.current) inputRef.current.value = "";
     }
   };
 
+  const handleFileSelect = (event) => {
+    uploadFile(event.target.files?.[0]);
+  };
+
+  const handleDrop = (event) => {
+    event.preventDefault();
+    setDragging(false);
+    uploadFile(event.dataTransfer.files?.[0]);
+  };
+
   return (
-    <div className="document-upload">
-      <h3>Upload Document</h3>
+    <section className="document-upload">
+      <div className="du-heading">
+        <div>
+          <span className="du-eyebrow">BUILD YOUR KNOWLEDGE BASE</span>
+          <h3>Add your documents</h3>
+          <p>Give your AI a source to think from.</p>
+        </div>
+
+        <div className="du-heading-symbol" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path
+              d="M12 16V4m0 0L7 9m5-5 5 5M5 15v4a1 1 0 001 1h12a1 1 0 001-1v-4"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </div>
+      </div>
+
       <div
-        className={`upload-area ${dragging ? 'dragging' : ''} ${uploading ? 'uploading' : ''}`}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
+        className={[
+          "du-dropzone",
+          dragging ? "is-dragging" : "",
+          uploading ? "is-uploading" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        onDragEnter={(event) => {
+          event.preventDefault();
+          if (!uploading) setDragging(true);
+        }}
+        onDragOver={(event) => {
+          event.preventDefault();
+          if (!uploading) setDragging(true);
+        }}
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) {
+            setDragging(false);
+          }
+        }}
         onDrop={handleDrop}
+        aria-busy={uploading}
       >
         {uploading ? (
-          <div className="upload-status">
-            <div className="spinner"></div>
-            <p>Uploading...</p>
+          <div className="du-progress-content" role="status">
+            <div className="du-spinner" />
+            <h4>Adding your document...</h4>
+            <p className="du-selected-name">{fileName}</p>
+            <div className="du-progress-track">
+              <span />
+            </div>
+            <span className="du-muted">Please wait while the file is processed.</span>
           </div>
         ) : (
           <>
-            <div className="upload-icon">📄</div>
-            <p>Drag and drop a file here, or click to select</p>
-            <p className="upload-hint">Supports: PDF, DOCX, Markdown, TXT</p>
+            <div className="du-upload-icon" aria-hidden="true">
+              <svg viewBox="0 0 48 48" fill="none">
+                <path
+                  d="M14 5.5h14l9 9V39a3.5 3.5 0 01-3.5 3.5h-19A3.5 3.5 0 0111 39V9a3.5 3.5 0 013-3.5z"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M28 6v9h9M24 33V21m-5 5 5-5 5 5"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </div>
+
+            <h4>{dragging ? "Drop your file here" : "Drop files to get started"}</h4>
+            <p className="du-drop-description">
+              Drag and drop your document here, or browse your device.
+            </p>
+
+            <button
+              type="button"
+              className="du-browse-button"
+              onClick={() => inputRef.current?.click()}
+            >
+              <span aria-hidden="true">＋</span>
+              Browse files
+              <span className="du-button-arrow" aria-hidden="true">↗</span>
+            </button>
+
             <input
+              ref={inputRef}
               type="file"
-              id="file-input"
+              accept={ACCEPTED_EXTENSIONS.join(",")}
               onChange={handleFileSelect}
-              accept=".pdf,.docx,.doc,.md,.txt,.markdown"
-              style={{ display: 'none' }}
+              className="du-hidden-input"
+              aria-label="Choose a document to upload"
+              disabled={uploading}
             />
-            <label htmlFor="file-input" className="upload-button">
-              Choose File
-            </label>
+
+            <div className="du-format-row">
+              <span>PDF</span>
+              <span>DOCX</span>
+              <span>DOC</span>
+              <span>MD</span>
+              <span>TXT</span>
+            </div>
           </>
         )}
       </div>
-      {message && (
-        <div className={`upload-message ${message.type}`}>
-          {message.text}
+
+      <div className="du-privacy-note">
+        <span className="du-privacy-icon" aria-hidden="true">✳</span>
+        <span>Your files become searchable in your knowledge base.</span>
+      </div>
+
+      {fileName && !uploading && (
+        <div className="du-file-preview">
+          <div className="du-file-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path
+                d="M6 2.75h8l5 5V21H6a2 2 0 01-2-2V4.75a2 2 0 012-2z"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M14 3v5h5M8 13h8M8 16.5h6"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+              />
+            </svg>
+          </div>
+
+          <div className="du-file-info">
+            <strong title={fileName}>{fileName}</strong>
+            <span>{fileSize}</span>
+          </div>
+
+          <span
+            className={`du-file-status ${
+              message?.type === "success"
+                ? "is-success"
+                : message?.type === "error"
+                  ? "is-error"
+                  : ""
+            }`}
+          >
+            {message?.type === "success"
+              ? "Added"
+              : message?.type === "error"
+                ? "Failed"
+                : "Selected"}
+          </span>
         </div>
       )}
-    </div>
+
+      {message && (
+        <div
+          className={`du-message ${message.type}`}
+          role={message.type === "error" ? "alert" : "status"}
+        >
+          <span className="du-message-icon" aria-hidden="true">
+            {message.type === "success" ? "✓" : "!"}
+          </span>
+          <span>{message.text}</span>
+          <button
+            type="button"
+            onClick={() => setMessage(null)}
+            aria-label="Dismiss message"
+          >
+            ×
+          </button>
+        </div>
+      )}
+    </section>
   );
 }
 

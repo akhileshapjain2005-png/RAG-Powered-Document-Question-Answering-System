@@ -1,141 +1,251 @@
-import axios from 'axios';
+import axios from "axios";
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
-const IS_PROD = import.meta.env.PROD;
-
-if (IS_PROD && API_BASE_URL.startsWith('http://')) {
-  throw new Error('VITE_API_URL must use HTTPS in production.');
-}
-
-function getBearerToken() {
-  if (import.meta.env.VITE_BEARER_TOKEN) {
-    return import.meta.env.VITE_BEARER_TOKEN;
-  }
-  if (typeof sessionStorage === 'undefined') {
-    return null;
-  }
-  const key = import.meta.env.VITE_AUTH_TOKEN_STORAGE_KEY || 'rag_access_token';
-  return sessionStorage.getItem(key);
-}
+const API_BASE_URL = import.meta.env.VITE_API_URL || "/api";
 
 const api = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: API_BASE_URL.replace(/\/+$/, ""),
+  timeout: 120000,
   headers: {
-    'Content-Type': 'application/json',
+    Accept: "application/json",
   },
 });
 
-api.interceptors.request.use((config) => {
-  const bearer = getBearerToken();
-  if (bearer) {
-    config.headers.Authorization = `Bearer ${bearer}`;
+// Attach optional API credentials if configured.
+api.interceptors.request.use(
+  (config) => {
+    const token = import.meta.env.VITE_API_TOKEN;
+    const apiKey = import.meta.env.VITE_API_KEY;
+
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+
+    if (apiKey) {
+      config.headers["X-API-Key"] = apiKey;
+    }
+
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
+
+// Normalize API errors for the UI.
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.code === "ECONNABORTED") {
+      error.message = "The request timed out. Please try again.";
+    } else if (!error.response) {
+      error.message =
+        "Cannot connect to the backend. Check that FastAPI is running and the API URL is correct.";
+    } else {
+      const detail =
+        error.response.data?.detail ||
+        error.response.data?.message;
+
+      if (typeof detail === "string") {
+        error.message = detail;
+      } else if (Array.isArray(detail)) {
+        error.message = detail
+          .map((item) => item.msg || JSON.stringify(item))
+          .join(", ");
+      }
+    }
+
+    return Promise.reject(error);
   }
-  const apiKey = import.meta.env.VITE_API_KEY;
-  if (apiKey) {
-    config.headers['X-API-Key'] = apiKey;
-  }
-  return config;
-});
+);
+
+// ------------------------------
+// DOCUMENT API
+// ------------------------------
 
 export const documentAPI = {
-  upload: async (file) => {
+  // Upload a PDF, DOCX, TXT, or another supported document.
+  async upload(file) {
     const formData = new FormData();
-    formData.append('file', file);
-    const response = await api.post('/documents/upload', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
+    formData.append("file", file);
+
+    const response = await api.post("/documents/upload", formData, {
+      timeout: 180000,
     });
+
     return response.data;
   },
 
-  list: async () => {
-    const response = await api.get('/documents');
+  // Get all uploaded documents.
+  async list() {
+    const response = await api.get("/documents");
     return response.data;
   },
 
-  get: async (documentId) => {
-    const response = await api.get(`/documents/${documentId}`);
+  // Get a document by ID.
+  async get(id) {
+    const response = await api.get(
+      `/documents/${encodeURIComponent(id)}`
+    );
     return response.data;
   },
 
-  delete: async (documentId) => {
-    const response = await api.delete(`/documents/${documentId}`);
+  // Delete a document by ID.
+  async delete(id) {
+    const response = await api.delete(
+      `/documents/${encodeURIComponent(id)}`
+    );
     return response.data;
   },
 };
 
+// ------------------------------
+// QUESTION ANSWERING API
+// ------------------------------
+
 export const qaAPI = {
-  ask: async (question, documentIds = null, topK = 5) => {
-    const response = await api.post('/ask', {
-      question,
-      document_ids: documentIds,
-      top_k: topK,
+  // Ask a question using the RAG backend.
+  async ask(payload) {
+    const response = await api.post("/ask", payload, {
+      timeout: 120000,
     });
+
     return response.data;
   },
 
-  askStream: async (question, documentIds = null, topK = 5, onChunk) => {
+  // Stream an answer from a Server-Sent Events endpoint.
+  // Expected signature: askStream(payload, onChunk)
+  async askStream(payload, onChunk) {
+    const baseURL = api.defaults.baseURL;
+    const url = `${baseURL}/ask/stream`;
+
     const headers = {
-      'Content-Type': 'application/json',
+      Accept: "text/event-stream",
+      "Content-Type": "application/json",
     };
-    const bearer = getBearerToken();
-    if (bearer) {
-      headers.Authorization = `Bearer ${bearer}`;
-    }
+
+    const token = import.meta.env.VITE_API_TOKEN;
     const apiKey = import.meta.env.VITE_API_KEY;
-    if (apiKey) {
-      headers['X-API-Key'] = apiKey;
+
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
     }
 
-    const response = await fetch(`${API_BASE_URL}/ask/stream`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        question,
-        document_ids: documentIds,
-        top_k: topK,
-      }),
-    });
+    if (apiKey) {
+      headers["X-API-Key"] = apiKey;
+    }
+
+    const controller = new AbortController();
+    let response;
+
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+        credentials: "same-origin",
+      });
+    } catch (error) {
+      if (error.name === "AbortError") {
+        throw new Error("The streaming request was cancelled.");
+      }
+      throw new Error(
+        "Could not connect to the streaming endpoint. Check your backend URL."
+      );
+    }
 
     if (!response.ok) {
-      throw new Error(`Streaming request failed (${response.status})`);
+      let message = `Streaming request failed (${response.status}).`;
+
+      try {
+        const body = await response.json();
+        message = body.detail || body.message || message;
+      } catch {
+        // Keep the fallback message if the response is not JSON.
+      }
+
+      throw new Error(message);
     }
+
     if (!response.body) {
-      throw new Error('Streaming not supported by response body');
-    }
-    const contentType = response.headers.get('content-type') || '';
-    if (!contentType.includes('text/event-stream')) {
-      throw new Error('Unexpected streaming content type');
+      throw new Error("The browser does not support response streaming.");
     }
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
+    let buffer = "";
+    let finalResult = null;
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+    const processEvent = (rawEvent) => {
+      const lines = rawEvent.split(/\r?\n/);
+      const dataLines = lines
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice(5).trimStart());
 
-      const chunk = decoder.decode(value);
-      const lines = chunk.split('\n');
+      if (dataLines.length === 0) return;
 
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6);
-          if (data && onChunk) {
-            onChunk(data);
-          }
-        }
+      const data = dataLines.join("\n");
+
+      if (data === "[DONE]") return;
+
+      let parsed;
+
+      try {
+        parsed = JSON.parse(data);
+      } catch {
+        parsed = data;
       }
+
+      if (
+        parsed &&
+        typeof parsed === "object" &&
+        !Array.isArray(parsed)
+      ) {
+        finalResult = { ...(finalResult || {}), ...parsed };
+      }
+
+      if (typeof onChunk === "function") {
+        onChunk(parsed);
+      }
+    };
+
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+
+        buffer += decoder.decode(value || new Uint8Array(), {
+          stream: !done,
+        });
+
+        const events = buffer.split(/\r?\n\r?\n/);
+        buffer = events.pop() || "";
+
+        for (const event of events) {
+          processEvent(event);
+        }
+
+        if (done) break;
+      }
+
+      if (buffer.trim()) {
+        processEvent(buffer);
+      }
+
+      return finalResult;
+    } finally {
+      reader.releaseLock();
     }
   },
 };
 
+// ------------------------------
+// STATISTICS API
+// ------------------------------
+
 export const statsAPI = {
-  get: async () => {
-    const response = await api.get('/stats');
+  async get() {
+    const response = await api.get("/stats");
     return response.data;
   },
 };
 
+// Default export for components that prefer importing the whole API client.
 export default api;

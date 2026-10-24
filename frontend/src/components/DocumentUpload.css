@@ -1,107 +1,519 @@
+/* Document upload — colourful RAG workspace */
+
 .document-upload {
-  margin-bottom: 2rem;
+  --du-green: #317c55;
+  --du-green-soft: #e4f4e7;
+  --du-violet: #7967d5;
+  --du-amber: #ae7434;
+  width: 100%;
+  min-width: 0;
+  color: var(--rag-text, #202c25);
 }
 
-.document-upload h3 {
-  margin-bottom: 1rem;
-  color: #333;
-  font-size: 1.2rem;
+.du-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 18px;
 }
 
-.upload-area {
-  border: 2px dashed #ccc;
-  border-radius: 8px;
-  padding: 2rem;
-  text-align: center;
-  cursor: pointer;
-  transition: all 0.3s;
-  background: #fafafa;
+.du-eyebrow {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--rag-primary, var(--du-green));
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1.2px;
 }
 
-.upload-area:hover {
-  border-color: #667eea;
-  background: #f0f0ff;
+.du-heading h3 {
+  margin: 0;
+  color: var(--rag-text, #202c25);
+  font-size: 19px;
+  font-weight: 750;
+  letter-spacing: -0.5px;
 }
 
-.upload-area.dragging {
-  border-color: #667eea;
-  background: #e8e8ff;
-  transform: scale(1.02);
+.du-heading p {
+  margin: 7px 0 0;
+  color: var(--rag-muted, #727d74);
+  font-size: 12px;
+  line-height: 1.6;
 }
 
-.upload-area.uploading {
-  border-color: #667eea;
-  background: #f0f0ff;
-  cursor: wait;
+.du-heading-symbol {
+  display: grid;
+  place-items: center;
+  width: 43px;
+  height: 43px;
+  flex-shrink: 0;
+  border: 1px solid #c9e8d0;
+  border-radius: 14px;
+  background: #e2f4e6;
+  color: #28764d;
 }
 
-.upload-icon {
-  font-size: 3rem;
-  margin-bottom: 1rem;
+.du-heading-symbol svg {
+  width: 24px;
+  height: 24px;
 }
 
-.upload-area p {
-  color: #666;
-  margin: 0.5rem 0;
-}
-
-.upload-hint {
-  font-size: 0.85rem;
-  color: #999;
-}
-
-.upload-button {
-  display: inline-block;
-  margin-top: 1rem;
-  padding: 0.75rem 1.5rem;
-  background: #667eea;
-  color: white;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background 0.2s;
-  font-weight: 500;
-}
-
-.upload-button:hover {
-  background: #5568d3;
-}
-
-.upload-status {
+.du-dropzone {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 1rem;
+  justify-content: center;
+  min-height: 235px;
+  padding: 25px 17px;
+  border: 1.5px dashed #b5d8bc;
+  border-radius: 18px;
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(174, 235, 188, 0.22), transparent 65%),
+    #f6fbf4;
+  text-align: center;
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease,
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
-.spinner {
-  width: 40px;
-  height: 40px;
-  border: 4px solid #f3f3f3;
-  border-top: 4px solid #667eea;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
+.du-dropzone:hover,
+.du-dropzone.is-dragging {
+  border-color: #61b77d;
+  background: #edf9ef;
+  box-shadow: 0 8px 25px rgba(49, 124, 85, 0.08);
 }
 
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+.du-dropzone.is-dragging {
+  transform: scale(1.01);
 }
 
-.upload-message {
-  margin-top: 1rem;
-  padding: 0.75rem;
+.du-dropzone.is-uploading {
+  border-style: solid;
+  border-color: #9e91ed;
+  background: #f6f3ff;
+}
+
+.du-upload-icon {
+  display: grid;
+  place-items: center;
+  width: 60px;
+  height: 60px;
+  margin-bottom: 13px;
+  border: 1px solid rgba(80, 154, 100, 0.16);
+  border-radius: 19px;
+  background: linear-gradient(145deg, #d9f4df, #c1ebce);
+  color: #28764d;
+  box-shadow: 0 7px 18px rgba(49, 124, 85, 0.08);
+}
+
+.du-upload-icon svg {
+  width: 38px;
+  height: 38px;
+}
+
+.du-dropzone h4 {
+  margin: 0;
+  color: var(--rag-text, #202c25);
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.du-drop-description {
+  max-width: 280px;
+  margin: 7px 0 15px;
+  color: var(--rag-muted, #727d74);
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.du-browse-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 41px;
+  padding: 0 17px;
+  border: 0;
+  border-radius: 11px;
+  background: linear-gradient(110deg, #327b53, #276747);
+  box-shadow: 0 6px 15px rgba(49, 124, 85, 0.18);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.du-browse-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 9px 20px rgba(49, 124, 85, 0.24);
+}
+
+.du-browse-button > span:first-child {
+  font-size: 17px;
+}
+
+.du-button-arrow {
+  margin-left: 2px;
+  font-size: 13px;
+}
+
+.du-hidden-input {
+  display: none;
+}
+
+.du-format-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 17px;
+}
+
+.du-format-row span {
+  padding: 5px 8px;
+  border: 1px solid #e0e8dd;
   border-radius: 6px;
-  font-size: 0.9rem;
+  background: rgba(255, 255, 255, 0.76);
+  color: #66756a;
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.4px;
 }
 
-.upload-message.success {
-  background: #d4edda;
-  color: #155724;
-  border: 1px solid #c3e6cb;
+.du-privacy-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-top: 13px;
+  color: var(--rag-muted, #727d74);
+  font-size: 10px;
+  line-height: 1.7;
 }
 
-.upload-message.error {
-  background: #f8d7da;
-  color: #721c24;
-  border: 1px solid #f5c6cb;
+.du-privacy-icon {
+  color: var(--du-green);
+  font-size: 14px;
+}
+
+.du-file-preview {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+  margin-top: 15px;
+  padding: 12px;
+  border: 1px solid var(--rag-border, #e8e6dc);
+  border-radius: 13px;
+  background: var(--rag-surface, #fffdf8);
+}
+
+.du-file-icon {
+  display: grid;
+  place-items: center;
+  width: 41px;
+  height: 45px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  background: #e4f4e7;
+  color: #28764d;
+}
+
+.du-file-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.du-file-info {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.du-file-info strong {
+  overflow: hidden;
+  color: var(--rag-text, #202c25);
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.du-file-info > span {
+  color: var(--rag-muted, #727d74);
+  font-size: 10px;
+}
+
+.du-file-status {
+  flex-shrink: 0;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: #eee9ff;
+  color: #6b59c2;
+  font-size: 9px;
+  font-weight: 750;
+}
+
+.du-file-status.is-success {
+  background: #e1f5e6;
+  color: #28764d;
+}
+
+.du-file-status.is-error {
+  background: #ffebe7;
+  color: #b34435;
+}
+
+.du-message {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-top: 12px;
+  padding: 11px 12px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.du-message.success {
+  border-color: #c6e8cd;
+  background: #eaf8ed;
+  color: #256840;
+}
+
+.du-message.error {
+  border-color: #f0c9c2;
+  background: #fff0ed;
+  color: #9d382e;
+}
+
+.du-message-icon {
+  display: grid;
+  place-items: center;
+  width: 19px;
+  height: 19px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.75);
+  font-weight: 800;
+}
+
+.du-message > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.du-message button {
+  flex-shrink: 0;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.du-progress-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  text-align: center;
+}
+
+.du-spinner {
+  width: 37px;
+  height: 37px;
+  margin-bottom: 15px;
+  border: 3px solid #ded8ff;
+  border-top-color: #7967d5;
+  border-radius: 50%;
+  animation: du-spin 0.8s linear infinite;
+}
+
+.du-progress-content h4 {
+  margin: 0;
+  color: var(--rag-text, #202c25);
+  font-size: 14px;
+}
+
+.du-selected-name {
+  max-width: 100%;
+  margin: 8px 0;
+  overflow: hidden;
+  color: var(--rag-muted, #727d74);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.du-progress-track {
+  width: 75%;
+  max-width: 230px;
+  height: 5px;
+  margin: 9px 0 12px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: #e1dcf8;
+}
+
+.du-progress-track span {
+  display: block;
+  width: 38%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #7e6cda, #a69aff);
+  animation: du-progress 1.5s ease-in-out infinite alternate;
+}
+
+.du-muted {
+  color: var(--rag-muted, #727d74);
+  font-size: 10px;
+}
+
+@keyframes du-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes du-progress {
+  from {
+    width: 20%;
+  }
+  to {
+    width: 90%;
+  }
+}
+
+/* Colourful dark theme */
+
+:root[data-theme="dark"] .document-upload {
+  --du-green: #9be9b2;
+  --du-green-soft: #234a33;
+}
+
+:root[data-theme="dark"] .du-heading-symbol {
+  border-color: #365c43;
+  background: linear-gradient(145deg, #264b34, #273d32);
+  color: #a4edb8;
+}
+
+:root[data-theme="dark"] .du-dropzone {
+  border-color: #456b50;
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(111, 213, 143, 0.13), transparent 65%),
+    #1a3024;
+}
+
+:root[data-theme="dark"] .du-dropzone:hover,
+:root[data-theme="dark"] .du-dropzone.is-dragging {
+  border-color: #83d99b;
+  background: #203c2b;
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.13);
+}
+
+:root[data-theme="dark"] .du-dropzone.is-uploading {
+  border-color: #8170d8;
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(148, 126, 243, 0.2), transparent 70%),
+    #292642;
+}
+
+:root[data-theme="dark"] .du-upload-icon {
+  border-color: #38664a;
+  background: linear-gradient(145deg, #2d6040, #234b35);
+  color: #b1f3c2;
+}
+
+:root[data-theme="dark"] .du-browse-button {
+  background: linear-gradient(110deg, #a1e9b5, #76d797);
+  color: #12281a;
+}
+
+:root[data-theme="dark"] .du-format-row span {
+  border-color: #3a5140;
+  background: #23392b;
+  color: #d1e6d5;
+}
+
+:root[data-theme="dark"] .du-file-icon {
+  background: #294d36;
+  color: #a5edb8;
+}
+
+:root[data-theme="dark"] .du-file-status {
+  background: #413766;
+  color: #d1c8ff;
+}
+
+:root[data-theme="dark"] .du-file-status.is-success {
+  background: #254b34;
+  color: #a8efbb;
+}
+
+:root[data-theme="dark"] .du-file-status.is-error {
+  background: #542e2b;
+  color: #ffb9ae;
+}
+
+:root[data-theme="dark"] .du-message.success {
+  border-color: #365b41;
+  background: #1e3b29;
+  color: #b2f0c0;
+}
+
+:root[data-theme="dark"] .du-message.error {
+  border-color: #67413b;
+  background: #432c2b;
+  color: #ffc1b7;
+}
+
+:root[data-theme="dark"] .du-spinner {
+  border-color: #4b426d;
+  border-top-color: #b6a9ff;
+}
+
+:root[data-theme="dark"] .du-progress-track {
+  background: #453d64;
+}
+
+@media (max-width: 420px) {
+  .du-dropzone {
+    min-height: 220px;
+    padding: 20px 12px;
+  }
+
+  .du-heading h3 {
+    font-size: 17px;
+  }
+
+  .du-file-preview {
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .du-file-status {
+    padding: 5px 6px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .du-spinner,
+  .du-progress-track span {
+    animation: none;
+  }
+
+  .du-dropzone,
+  .du-browse-button {
+    transition: none;
+  }
 }

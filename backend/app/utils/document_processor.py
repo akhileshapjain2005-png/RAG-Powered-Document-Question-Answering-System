@@ -1,141 +1,159 @@
-"""Document processing utilities for extracting text from various file formats."""
+
+"""Document processing utilities for extracting and chunking documents."""
 
 import os
 import re
-from typing import List, Dict, Optional
+from io import BytesIO
 from pathlib import Path
-import PyPDF2
+from typing import Any, Dict, List
+
 import docx
 import markdown
-from io import BytesIO
+from pypdf import PdfReader
 
 
 MAX_PDF_PAGES = int(os.getenv("MAX_PDF_PAGES", "500"))
-MAX_EXTRACTED_TEXT_CHARS = int(os.getenv("MAX_EXTRACTED_TEXT_CHARS", str(5_000_000)))
+MAX_EXTRACTED_TEXT_CHARS = int(
+    os.getenv("MAX_EXTRACTED_TEXT_CHARS", "5000000")
+)
 
 
 class DocumentProcessor:
-    """Processes documents in various formats and extracts text."""
-    
-    # .doc is legacy binary; only .docx is safely supported for Word
-    SUPPORTED_EXTENSIONS = {'.pdf', '.docx', '.md', '.txt', '.markdown'}
-    
+    """Extract text from supported document formats and split it into chunks."""
+
+    SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".md", ".txt", ".markdown"}
+
     @staticmethod
     def is_supported(filename: str) -> bool:
-        """Check if file extension is supported."""
-        ext = Path(filename).suffix.lower()
-        return ext in DocumentProcessor.SUPPORTED_EXTENSIONS
-    
+        return Path(filename).suffix.lower() in DocumentProcessor.SUPPORTED_EXTENSIONS
+
     @staticmethod
     def extract_text(file_content: bytes, filename: str) -> str:
-        """Extract text from file content based on file extension."""
         ext = Path(filename).suffix.lower()
-        
-        if ext == '.pdf':
+
+        if ext == ".pdf":
             return DocumentProcessor._extract_from_pdf(file_content)
-        elif ext == '.docx':
+        if ext == ".docx":
             return DocumentProcessor._extract_from_docx(file_content)
-        elif ext in ['.md', '.markdown']:
+        if ext in {".md", ".markdown"}:
             return DocumentProcessor._extract_from_markdown(file_content)
-        elif ext == '.txt':
-            raw = file_content.decode('utf-8', errors='replace')
-            if len(raw) > MAX_EXTRACTED_TEXT_CHARS:
-                return raw[:MAX_EXTRACTED_TEXT_CHARS]
-            return raw
-        else:
-            raise ValueError(f"Unsupported file type: {ext}")
-    
+        if ext == ".txt":
+            return file_content.decode("utf-8", errors="replace")[
+                :MAX_EXTRACTED_TEXT_CHARS
+            ]
+
+        raise ValueError(f"Unsupported file type: {ext}")
+
     @staticmethod
     def _extract_from_pdf(content: bytes) -> str:
-        """Extract text from PDF file."""
-        pdf_file = BytesIO(content)
-        pdf_reader = PyPDF2.PdfReader(pdf_file)
+        pdf_reader = PdfReader(BytesIO(content))
         n_pages = len(pdf_reader.pages)
+
         if n_pages > MAX_PDF_PAGES:
             raise ValueError(
-                f"PDF has too many pages ({n_pages}); maximum allowed is {MAX_PDF_PAGES}"
+                f"PDF has too many pages ({n_pages}); "
+                f"maximum allowed is {MAX_PDF_PAGES}"
             )
-        text = []
+
+        text_parts = []
         total_chars = 0
+
         for page in pdf_reader.pages:
-            chunk = page.extract_text() or ""
-            if total_chars + len(chunk) > MAX_EXTRACTED_TEXT_CHARS:
-                allowed = MAX_EXTRACTED_TEXT_CHARS - total_chars
-                if allowed > 0:
-                    text.append(chunk[:allowed])
+            page_text = page.extract_text() or ""
+            remaining = MAX_EXTRACTED_TEXT_CHARS - total_chars
+
+            if remaining <= 0:
                 break
-            text.append(chunk)
-            total_chars += len(chunk)
-        return '\n'.join(text)
-    
+
+            text_parts.append(page_text[:remaining])
+            total_chars += min(len(page_text), remaining)
+
+            if len(page_text) > remaining:
+                break
+
+        return "\n".join(text_parts)
+
     @staticmethod
     def _extract_from_docx(content: bytes) -> str:
-        """Extract text from DOCX file."""
-        doc_file = BytesIO(content)
-        doc = docx.Document(doc_file)
-        paragraphs = [para.text for para in doc.paragraphs]
-        out = '\n'.join(paragraphs)
-        if len(out) > MAX_EXTRACTED_TEXT_CHARS:
-            return out[:MAX_EXTRACTED_TEXT_CHARS]
-        return out
-    
+        document = docx.Document(BytesIO(content))
+        text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+        return text[:MAX_EXTRACTED_TEXT_CHARS]
+
     @staticmethod
     def _extract_from_markdown(content: bytes) -> str:
-        """Extract text from Markdown file."""
-        md_text = content.decode('utf-8')
-        if len(md_text) > MAX_EXTRACTED_TEXT_CHARS:
-            md_text = md_text[:MAX_EXTRACTED_TEXT_CHARS]
-        # Convert markdown to plain text (remove formatting)
+        md_text = content.decode("utf-8", errors="replace")
+        md_text = md_text[:MAX_EXTRACTED_TEXT_CHARS]
         html = markdown.markdown(md_text)
-        # Simple HTML tag removal (for basic markdown)
-        text = re.sub(r'<[^>]+>', '', html)
-        return text
-    
+        return re.sub(r"<[^>]+>", "", html)
+
     @staticmethod
-    def chunk_text(text: str, chunk_size: int = 1000, chunk_overlap: int = 200) -> List[Dict[str, any]]:
-        """
-        Split text into chunks with overlap.
-        
-        Args:
-            text: Text to chunk
-            chunk_size: Maximum size of each chunk in characters
-            chunk_overlap: Number of characters to overlap between chunks
-            
-        Returns:
-            List of dictionaries with 'text' and 'metadata' keys
-        """
-        if len(text) <= chunk_size:
-            return [{'text': text, 'metadata': {'chunk_index': 0, 'start': 0, 'end': len(text)}}]
-        
+    def chunk_text(
+        text: str,
+        chunk_size: int = 1000,
+        chunk_overlap: int = 200,
+    ) -> List[Dict[str, Any]]:
+        """Split text into overlapping chunks with guaranteed forward progress."""
+
+        if chunk_size <= 0:
+            raise ValueError("chunk_size must be greater than zero")
+
+        if chunk_overlap < 0 or chunk_overlap >= chunk_size:
+            raise ValueError(
+                "chunk_overlap must be non-negative and smaller than chunk_size"
+            )
+
+        if not text:
+            return []
+
         chunks = []
+        text_length = len(text)
         start = 0
         chunk_index = 0
-        
-        while start < len(text):
-            end = start + chunk_size
-            chunk_text = text[start:end]
-            
-            # Try to break at sentence boundary
-            if end < len(text):
-                # Look for sentence endings
-                last_period = chunk_text.rfind('.')
-                last_newline = chunk_text.rfind('\n')
+        step = chunk_size - chunk_overlap
+
+        while start < text_length:
+            end = min(start + chunk_size, text_length)
+            boundary = end
+
+            # Prefer a nearby sentence or newline boundary, but never
+            # allow boundary selection to prevent forward progress.
+            if end < text_length:
+                window = text[start:end]
+                last_period = window.rfind(".")
+                last_newline = window.rfind("\n")
                 break_point = max(last_period, last_newline)
-                
-                if break_point > chunk_size * 0.5:  # Only break if we're past halfway
-                    chunk_text = chunk_text[:break_point + 1]
-                    end = start + break_point + 1
-            
-            chunks.append({
-                'text': chunk_text.strip(),
-                'metadata': {
-                    'chunk_index': chunk_index,
-                    'start': start,
-                    'end': end
-                }
-            })
-            
-            start = end - chunk_overlap
-            chunk_index += 1
-        
+
+                if break_point > chunk_size // 2:
+                    boundary = start + break_point + 1
+
+            # Ensure this chunk always advances the input position.
+            if boundary <= start:
+                boundary = min(start + chunk_size, text_length)
+
+            chunk = text[start:boundary].strip()
+
+            if chunk:
+                chunks.append(
+                    {
+                        "text": chunk,
+                        "metadata": {
+                            "chunk_index": chunk_index,
+                            "start": start,
+                            "end": boundary,
+                        },
+                    }
+                )
+                chunk_index += 1
+
+            if boundary >= text_length:
+                break
+
+            # Always advance by at least one character, while retaining
+            # the configured overlap relative to the selected boundary.
+            next_start = boundary - chunk_overlap
+            if next_start <= start:
+                next_start = start + step
+
+            start = next_start
+
         return chunks

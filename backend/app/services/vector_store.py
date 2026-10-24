@@ -1,136 +1,273 @@
-"""Vector store service for managing document embeddings and similarity search."""
 
-from typing import List, Dict, Optional, Tuple
-import chromadb
-from chromadb.config import Settings
-import numpy as np
+"""Vector store service for document embeddings and similarity search."""
+
 from pathlib import Path
+from typing import Dict, List, Optional
+
+import chromadb
+import numpy as np
+from chromadb.config import Settings
 
 
 class VectorStore:
-    """Manages vector database for document embeddings."""
-    
-    def __init__(self, persist_directory: str = "./chroma_db", collection_name: str = "documents"):
-        """
-        Initialize the vector store.
-        
-        Args:
-            persist_directory: Directory to persist the database
-            collection_name: Name of the collection to use
-        """
-        self.persist_directory = persist_directory
+    """Manage persistent document embeddings and similarity search."""
+
+    def __init__(
+        self,
+        persist_directory: str = r"C:\RAG-DocQA-Chroma",
+        collection_name: str = "documents",
+    ):
+        self.persist_directory = str(Path(persist_directory).resolve())
         self.collection_name = collection_name
-        
-        # Create directory if it doesn't exist
-        Path(persist_directory).mkdir(parents=True, exist_ok=True)
-        
-        # Initialize ChromaDB client
+
+        Path(self.persist_directory).mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
         self.client = chromadb.PersistentClient(
-            path=persist_directory,
-            settings=Settings(anonymized_telemetry=False)
+            path=self.persist_directory,
+            settings=Settings(anonymized_telemetry=False),
         )
-        
-        # Get or create collection
+
         self.collection = self.client.get_or_create_collection(
-            name=collection_name,
-            metadata={"hnsw:space": "cosine"}
+            name=self.collection_name,
+            metadata={"hnsw:space": "cosine"},
         )
-    
+
+        print(
+            f"VECTOR STORE: Connected to {self.persist_directory}"
+        )
+        print(
+            f"VECTOR STORE: Collection '{self.collection_name}' "
+            f"contains {self.collection.count()} records"
+        )
+
     def add_documents(
         self,
         texts: List[str],
         embeddings: np.ndarray,
         metadatas: List[Dict],
-        ids: Optional[List[str]] = None
+        ids: Optional[List[str]] = None,
     ) -> List[str]:
-        """
-        Add documents to the vector store.
-        
-        Args:
-            texts: List of text chunks
-            embeddings: Numpy array of embeddings (2D)
-            metadatas: List of metadata dictionaries for each chunk
-            ids: Optional list of IDs. If None, will be auto-generated
-            
-        Returns:
-            List of document IDs
-        """
-        if ids is None:
-            ids = [f"doc_{i}_{metadatas[i].get('chunk_index', i)}" for i in range(len(texts))]
-        
-        # Convert numpy array to list of lists
-        embeddings_list = embeddings.tolist()
-        
-        self.collection.add(
-            embeddings=embeddings_list,
-            documents=texts,
-            metadatas=metadatas,
-            ids=ids
+        """Store document chunks, embeddings, and metadata."""
+
+        if not texts:
+            return []
+
+        if len(texts) != len(metadatas):
+            raise ValueError(
+                "The number of texts must match the number of metadata records."
+            )
+
+        embeddings_array = np.asarray(
+            embeddings,
+            dtype=np.float32,
         )
-        
+
+        if embeddings_array.ndim != 2:
+            raise ValueError(
+                "Embeddings must be a two-dimensional array."
+            )
+
+        if len(embeddings_array) != len(texts):
+            raise ValueError(
+                "The number of embeddings must match the number of text chunks."
+            )
+
+        if embeddings_array.shape[1] == 0:
+            raise ValueError("Embedding vectors cannot be empty.")
+
+        if not np.isfinite(embeddings_array).all():
+            raise ValueError(
+                "Embeddings contain NaN or infinite values."
+            )
+
+        if ids is None:
+            ids = [
+                f"doc_{i}_{metadatas[i].get('chunk_index', i)}"
+                for i in range(len(texts))
+            ]
+
+        if len(ids) != len(texts):
+            raise ValueError(
+                "The number of IDs must match the number of text chunks."
+            )
+
+        if len(set(ids)) != len(ids):
+            raise ValueError(
+                "Document chunk IDs must be unique."
+            )
+
+        # ChromaDB requires string IDs and supported metadata values.
+        if not all(isinstance(item, str) and item for item in ids):
+            raise ValueError(
+                "Every document chunk ID must be a non-empty string."
+            )
+
+        clean_metadatas = []
+
+        for metadata in metadatas:
+            if not isinstance(metadata, dict):
+                raise ValueError(
+                    "Every metadata record must be a dictionary."
+                )
+
+            clean_metadata = {}
+
+            for key, value in metadata.items():
+                if value is None:
+                    continue
+
+                if isinstance(value, np.generic):
+                    value = value.item()
+
+                if isinstance(value, (str, int, float, bool)):
+                    clean_metadata[str(key)] = value
+                else:
+                    clean_metadata[str(key)] = str(value)
+
+            clean_metadatas.append(clean_metadata)
+
+        print(
+            f"VECTOR STORE DEBUG: path={self.persist_directory}, "
+            f"collection={self.collection_name}, "
+            f"chunks={len(texts)}, "
+            f"dimensions={embeddings_array.shape[1]}"
+        )
+
+        try:
+            self.collection.upsert(
+                ids=ids,
+                embeddings=embeddings_array.tolist(),
+                documents=[str(text) for text in texts],
+                metadatas=clean_metadatas,
+            )
+
+            print("VECTOR STORE DEBUG: Upsert completed.")
+
+            stored_count = self.collection.count()
+
+            print(
+                f"VECTOR STORE DEBUG: Collection count={stored_count}"
+            )
+
+        except Exception as exc:
+            print(
+                f"VECTOR STORE ERROR: {type(exc).__name__}: {exc}"
+            )
+            raise
+
         return ids
-    
+
     def search(
         self,
         query_embedding: np.ndarray,
         n_results: int = 5,
-        filter_metadata: Optional[Dict] = None
+        filter_metadata: Optional[Dict] = None,
     ) -> List[Dict]:
-        """
-        Search for similar documents.
-        
-        Args:
-            query_embedding: Query embedding vector (1D or 2D)
-            n_results: Number of results to return
-            filter_metadata: Optional metadata filter
-            
-        Returns:
-            List of dictionaries with 'text', 'metadata', 'distance', and 'id' keys
-        """
-        # Ensure query_embedding is 2D
-        if query_embedding.ndim == 1:
-            query_embedding = query_embedding.reshape(1, -1)
-        
-        query_embedding_list = query_embedding.tolist()
-        
-        where = filter_metadata if filter_metadata else None
-        
-        results = self.collection.query(
-            query_embeddings=query_embedding_list,
-            n_results=n_results,
-            where=where
+        """Search for chunks similar to a query embedding."""
+
+        query_array = np.asarray(
+            query_embedding,
+            dtype=np.float32,
         )
-        
-        # Format results
+
+        if query_array.ndim == 1:
+            query_array = query_array.reshape(1, -1)
+
+        if query_array.ndim != 2 or query_array.shape[0] != 1:
+            raise ValueError(
+                "The query embedding must contain exactly one query vector."
+            )
+
+        if not np.isfinite(query_array).all():
+            raise ValueError(
+                "Query embedding contains NaN or infinite values."
+            )
+
+        if query_array.shape[1] != self.collection.metadata.get(
+            "embedding_dimension",
+            query_array.shape[1],
+        ):
+            raise ValueError("Invalid query embedding dimensions.")
+
+        count = self.collection.count()
+
+        if count == 0:
+            return []
+
+        query_arguments = {
+            "query_embeddings": query_array.tolist(),
+            "n_results": min(max(1, n_results), count),
+            "include": ["documents", "metadatas", "distances"],
+        }
+
+        if filter_metadata:
+            query_arguments["where"] = filter_metadata
+
+        results = self.collection.query(**query_arguments)
+
         formatted_results = []
-        if results['ids'] and len(results['ids'][0]) > 0:
-            for i in range(len(results['ids'][0])):
-                formatted_results.append({
-                    'id': results['ids'][0][i],
-                    'text': results['documents'][0][i],
-                    'metadata': results['metadatas'][0][i],
-                    'distance': results['distances'][0][i] if 'distances' in results else None
-                })
-        
+
+        result_ids = results.get("ids") or [[]]
+        result_documents = results.get("documents") or [[]]
+        result_metadatas = results.get("metadatas") or [[]]
+        result_distances = results.get("distances") or [[]]
+
+        for index, result_id in enumerate(result_ids[0]):
+            documents = result_documents[0]
+            metadatas = result_metadatas[0]
+            distances = result_distances[0]
+
+            formatted_results.append(
+                {
+                    "id": result_id,
+                    "text": (
+                        documents[index]
+                        if index < len(documents)
+                        and documents[index] is not None
+                        else ""
+                    ),
+                    "metadata": (
+                        metadatas[index]
+                        if index < len(metadatas)
+                        and metadatas[index] is not None
+                        else {}
+                    ),
+                    "distance": (
+                        distances[index]
+                        if index < len(distances)
+                        else None
+                    ),
+                }
+            )
+
         return formatted_results
-    
-    def delete_documents(self, document_id: Optional[str] = None, filter_metadata: Optional[Dict] = None):
-        """
-        Delete documents from the vector store.
-        
-        Args:
-            document_id: Specific document ID to delete
-            filter_metadata: Metadata filter to delete matching documents
-        """
+
+    def delete_documents(
+        self,
+        document_id: Optional[str] = None,
+        filter_metadata: Optional[Dict] = None,
+    ) -> None:
+        """Delete document chunks by ID or metadata filter."""
+
         if document_id:
             self.collection.delete(ids=[document_id])
+
         elif filter_metadata:
             self.collection.delete(where=filter_metadata)
-    
+
+        else:
+            raise ValueError(
+                "Provide either document_id or filter_metadata."
+            )
+
     def get_collection_stats(self) -> Dict:
-        """Get statistics about the collection."""
-        count = self.collection.count()
+        """Return vector collection statistics."""
+
         return {
-            'total_documents': count,
-            'collection_name': self.collection_name
+            "total_documents": self.collection.count(),
+            "collection_name": self.collection_name,
+            "persist_directory": self.persist_directory,
         }
