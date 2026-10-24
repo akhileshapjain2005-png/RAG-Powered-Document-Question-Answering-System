@@ -2,7 +2,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import "./App.css";
 
-const API = "http://127.0.0.1:8000/api/v1";
+const API = "/api";
+
+const authHeaders = () => {
+  const key = import.meta.env.VITE_API_KEY;
+  return key ? { "X-API-Key": key } : {};
+};
+
+const sameId = (a, b) => String(a) === String(b);
 
 export default function App() {
   const [documents, setDocuments] = useState([]);
@@ -20,7 +27,9 @@ export default function App() {
 
   const loadDocuments = useCallback(async () => {
     try {
-      const response = await fetch(`${API}/documents`);
+      const response = await fetch(`${API}/documents`, {
+        headers: authHeaders(),
+      });
 
       if (!response.ok) {
         throw new Error(`Could not load documents (${response.status}).`);
@@ -32,8 +41,10 @@ export default function App() {
         : result.documents || result.items || [];
 
       setDocuments(list);
+
+      const validIds = new Set(list.map((doc) => String(doc.id)));
       setSelected((current) =>
-        current.filter((id) => list.some((doc) => doc.id === id))
+        current.filter((id) => validIds.has(String(id)))
       );
     } catch (err) {
       setError(
@@ -57,12 +68,33 @@ export default function App() {
       .includes(search.toLowerCase())
   );
 
+  const isSelected = (id) =>
+    selected.some((selectedId) => sameId(selectedId, id));
+
+  // Clear the conversation only. Do not delete documents or change selection.
+  function clearChat() {
+    setMessages([]);
+    setQuestion("");
+    setError("");
+  }
+
   function toggleDocument(id) {
     setSelected((current) =>
-      current.includes(id)
-        ? current.filter((item) => item !== id)
+      current.some((item) => sameId(item, id))
+        ? current.filter((item) => !sameId(item, id))
         : [...current, id]
     );
+
+    clearChat();
+  }
+
+  function selectAllDocuments() {
+    const allSelected =
+      documents.length > 0 &&
+      documents.every((doc) => isSelected(doc.id));
+
+    setSelected(allSelected ? [] : documents.map((doc) => doc.id));
+    clearChat();
   }
 
   async function uploadFiles(event) {
@@ -72,6 +104,8 @@ export default function App() {
     setUploading(true);
     setError("");
 
+    const newlyUploadedIds = [];
+
     try {
       for (const file of files) {
         const formData = new FormData();
@@ -79,18 +113,34 @@ export default function App() {
 
         const response = await fetch(`${API}/documents/upload`, {
           method: "POST",
+          headers: authHeaders(),
           body: formData,
         });
 
+        const result = await response.json().catch(() => ({}));
+
         if (!response.ok) {
-          const body = await response.json().catch(() => ({}));
           throw new Error(
-            body.detail || `Failed to upload ${file.name}.`
+            result.detail || `Failed to upload ${file.name}.`
           );
+        }
+
+        if (result.id !== undefined && result.id !== null) {
+          newlyUploadedIds.push(result.id);
         }
       }
 
       await loadDocuments();
+
+      // Select only the newly uploaded documents.
+      setSelected(newlyUploadedIds);
+      clearChat();
+
+      if (newlyUploadedIds.length === 0) {
+        setError(
+          "Upload completed, but the server did not return document IDs. Select the document from your library."
+        );
+      }
     } catch (err) {
       setError(err.message || "Document upload failed.");
     } finally {
@@ -109,7 +159,10 @@ export default function App() {
     try {
       const response = await fetch(
         `${API}/documents/${encodeURIComponent(doc.id)}`,
-        { method: "DELETE" }
+        {
+          method: "DELETE",
+          headers: authHeaders(),
+        }
       );
 
       if (!response.ok) {
@@ -118,10 +171,14 @@ export default function App() {
       }
 
       setDocuments((current) =>
-        current.filter((item) => item.id !== doc.id)
+        current.filter((item) => !sameId(item.id, doc.id))
       );
 
-      setSelected((current) => current.filter((id) => id !== doc.id));
+      setSelected((current) =>
+        current.filter((id) => !sameId(id, doc.id))
+      );
+
+      clearChat();
     } catch (err) {
       setError(err.message || "Could not delete the document.");
     }
@@ -131,6 +188,16 @@ export default function App() {
     const prompt = text.trim();
 
     if (!prompt || loading) return;
+
+    if (selected.length === 0) {
+      setError(
+        "Please select at least one document before asking a question."
+      );
+      return;
+    }
+
+    // Send only the IDs selected by the user.
+    const selectedIds = [...selected];
 
     setMessages((current) => [
       ...current,
@@ -148,10 +215,13 @@ export default function App() {
     try {
       const response = await fetch(`${API}/ask`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders(),
+        },
         body: JSON.stringify({
           question: prompt,
-          document_ids: selected.length ? selected : null,
+          document_ids: selectedIds,
           top_k: 5,
         }),
       });
@@ -189,19 +259,19 @@ export default function App() {
       icon: "⌕",
       title: "Find important details",
       subtitle: "Locate facts and essential information",
-      prompt: "What are the most important details in my documents?",
+      prompt: "What are the most important details in my selected documents?",
     },
     {
       icon: "⇄",
       title: "Compare information",
       subtitle: "Discover similarities and differences",
-      prompt: "Compare the main ideas and differences in my documents.",
+      prompt: "Compare the main ideas and differences in my selected documents.",
     },
     {
       icon: "▤",
       title: "Explain a concept",
       subtitle: "Understand difficult topics simply",
-      prompt: "Explain the main concepts in my documents in simple terms.",
+      prompt: "Explain the main concepts in my selected documents in simple terms.",
     },
   ];
 
@@ -210,7 +280,6 @@ export default function App() {
       <aside className="sidebar">
         <a className="brand" href="#workspace">
           <span className="brand-icon">R</span>
-
           <span className="brand-copy">
             <strong>RAG-DocQA</strong>
             <small>DOCUMENT INTELLIGENCE</small>
@@ -240,14 +309,14 @@ export default function App() {
           {documents.slice(0, 10).map((doc) => (
             <button
               className={`sidebar-document ${
-                selected.includes(doc.id) ? "selected" : ""
+                isSelected(doc.id) ? "selected" : ""
               }`}
-              key={doc.id}
+              key={String(doc.id)}
               onClick={() => toggleDocument(doc.id)}
               title={doc.filename || doc.name}
+              aria-pressed={isSelected(doc.id)}
             >
               <span className="mini-file">FILE</span>
-
               <span className="sidebar-document-name">
                 {doc.filename || doc.name || "Untitled document"}
               </span>
@@ -259,16 +328,28 @@ export default function App() {
               Your documents will appear here.
             </p>
           )}
+
+          {documents.length > 10 && (
+            <button
+              className="nav-item"
+              onClick={() =>
+                document.getElementById("documents-panel")?.scrollIntoView({
+                  behavior: "smooth",
+                  block: "center",
+                })
+              }
+            >
+              View all {documents.length} documents
+            </button>
+          )}
         </div>
 
         <div className="sidebar-footer">
           <span className="status-dot" />
-
           <span>
             <strong>Local AI engine</strong>
             <small>Private workspace</small>
           </span>
-
           <span className="live-tag">LIVE</span>
         </div>
       </aside>
@@ -333,11 +414,9 @@ export default function App() {
           <div className="welcome-art" aria-hidden="true">
             <div className="orbit orbit-one" />
             <div className="orbit orbit-two" />
-
             <div className="art-core">
               <span>R</span>
             </div>
-
             <div className="art-chip chip-one">AI</div>
             <div className="art-chip chip-two">⌘</div>
             <div className="art-chip chip-three">✧</div>
@@ -353,7 +432,6 @@ export default function App() {
         )}
 
         <section className="workspace-grid">
-          {/* LEFT PANEL: DOCUMENT UPLOAD AND LIBRARY */}
           <aside className="panel documents-panel" id="documents-panel">
             <div className="panel-heading">
               <div>
@@ -361,7 +439,6 @@ export default function App() {
                 <h2>My Documents</h2>
                 <p>Upload, select and manage your files.</p>
               </div>
-
               <span className="document-count">
                 {String(documents.length).padStart(2, "0")}
               </span>
@@ -375,34 +452,27 @@ export default function App() {
               <span className="upload-icon">
                 {uploading ? "…" : "↑"}
               </span>
-
               <span className="upload-copy">
                 <strong>
                   {uploading ? "Uploading documents..." : "Upload documents"}
                 </strong>
                 <small>Click to browse PDF, TXT or DOCX files</small>
               </span>
-
               <span className="upload-plus">+</span>
             </button>
 
             <div className="document-stats">
               <div>
                 <span className="stats-icon">▤</span>
-
                 <span>
                   <strong>{documents.length}</strong>
                   <small>Documents</small>
                 </span>
               </div>
-
               <div>
                 <span className="stats-icon">✓</span>
-
                 <span>
-                  <strong>
-                    {selected.length === 0 ? "All" : selected.length}
-                  </strong>
+                  <strong>{selected.length}</strong>
                   <small>Selected</small>
                 </span>
               </div>
@@ -411,7 +481,6 @@ export default function App() {
             <div className="document-toolbar">
               <label className="search-box">
                 <span>⌕</span>
-
                 <input
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
@@ -422,17 +491,11 @@ export default function App() {
 
               <button
                 className="text-button"
-                onClick={() =>
-                  setSelected(
-                    selected.length === documents.length
-                      ? []
-                      : documents.map((doc) => doc.id)
-                  )
-                }
+                onClick={selectAllDocuments}
                 disabled={!documents.length}
               >
                 {documents.length > 0 &&
-                selected.length === documents.length
+                documents.every((doc) => isSelected(doc.id))
                   ? "Clear"
                   : "Select all"}
               </button>
@@ -442,40 +505,38 @@ export default function App() {
               {filteredDocuments.map((doc) => {
                 const filename =
                   doc.filename || doc.name || "Untitled document";
-
                 const extension = filename.split(".").pop().toLowerCase();
-
                 const fileType =
                   extension === "pdf"
                     ? "PDF"
                     : extension === "docx"
                       ? "DOC"
                       : "TXT";
+                const active = isSelected(doc.id);
 
                 return (
                   <article
-                    key={doc.id}
+                    key={String(doc.id)}
                     className={`document-card ${
-                      selected.includes(doc.id) ? "document-selected" : ""
+                      active ? "document-selected" : ""
                     }`}
                   >
                     <button
+                      type="button"
                       className="document-main"
                       onClick={() => toggleDocument(doc.id)}
-                      title="Select document"
+                      title={active ? "Deselect document" : "Select document"}
+                      aria-pressed={active}
                     >
                       <span className="file-icon">
                         <span>{fileType}</span>
                       </span>
-
                       <span className="document-info">
                         <strong>{filename}</strong>
-
                         <small>
                           {doc.uploaded_at
                             ? new Date(doc.uploaded_at).toLocaleDateString()
                             : "In your library"}
-
                           {doc.chunk_count != null
                             ? ` · ${doc.chunk_count} chunks`
                             : ""}
@@ -486,13 +547,13 @@ export default function App() {
                     <div className="document-actions">
                       <span
                         className={`selection-indicator ${
-                          selected.includes(doc.id) ? "is-selected" : ""
+                          active ? "is-selected" : ""
                         }`}
                       >
-                        ✓
+                        {active ? "✓" : "+"}
                       </span>
-
                       <button
+                        type="button"
                         className="delete-button"
                         onClick={() => deleteDocument(doc)}
                         title={`Delete ${filename}`}
@@ -508,19 +569,16 @@ export default function App() {
               {filteredDocuments.length === 0 && (
                 <div className="empty-state">
                   <span className="empty-icon">▤</span>
-
                   <strong>
                     {documents.length
                       ? "No matching documents"
                       : "Your library is empty"}
                   </strong>
-
                   <p>
                     {documents.length
                       ? "Try another search term."
                       : "Upload a PDF, TXT, or DOCX file to start asking questions."}
                   </p>
-
                   {!documents.length && (
                     <button
                       className="primary-button"
@@ -540,21 +598,36 @@ export default function App() {
             </div>
           </aside>
 
-          {/* RIGHT PANEL: AI QUESTIONS AND ANSWERS */}
           <section className="panel chat-panel">
             <div className="panel-heading">
               <div>
                 <div className="eyebrow">AI ASSISTANT</div>
                 <h2>What would you like to know?</h2>
-
                 <p>
                   {selected.length
                     ? `Answers focused on ${selected.length} selected document(s).`
-                    : "Answers grounded in your document library."}
+                    : "Select a document from your library to get started."}
                 </p>
               </div>
 
-              <span className="assistant-avatar">✳</span>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "12px",
+                }}
+              >
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={clearChat}
+                  disabled={messages.length === 0 && !question && !error}
+                  title="Clear questions and answers without deleting documents"
+                >
+                  Clear Chat
+                </button>
+                <span className="assistant-avatar">✳</span>
+              </div>
             </div>
 
             {messages.length === 0 ? (
@@ -567,12 +640,10 @@ export default function App() {
                     disabled={loading}
                   >
                     <span className="suggestion-icon">{item.icon}</span>
-
                     <span className="suggestion-copy">
                       <strong>{item.title}</strong>
                       <small>{item.subtitle}</small>
                     </span>
-
                     <span className="suggestion-arrow">↗</span>
                   </button>
                 ))}
@@ -589,25 +660,21 @@ export default function App() {
                     <div className="message-avatar">
                       {message.role === "user" ? "U" : "R"}
                     </div>
-
                     <div className="message-body">
                       <div className="message-author">
                         {message.role === "user" ? "You" : "RAG-DocQA"}
                       </div>
-
                       <div className="message-text">{message.content}</div>
 
                       {!!message.sources?.length && (
                         <div className="source-list">
                           <div className="source-heading">SOURCES USED</div>
-
                           {message.sources.map((source, index) => (
                             <div
                               className="source-item"
                               key={`${source.document_id || source.filename || "source"}-${index}`}
                             >
                               <span className="mini-file">FILE</span>
-
                               <span>
                                 {source.filename || "Document source"}
                               </span>
@@ -622,11 +689,10 @@ export default function App() {
                 {loading && (
                   <div className="thinking">
                     <span className="assistant-avatar">R</span>
-                    <span>Searching your knowledge...</span>
+                    <span>Searching your selected documents...</span>
                     <span className="thinking-dots">•••</span>
                   </div>
                 )}
-
                 <div ref={chatEndRef} />
               </div>
             )}
@@ -644,7 +710,7 @@ export default function App() {
                 placeholder={
                   selected.length
                     ? `Ask about ${selected.length} selected document(s)...`
-                    : "Ask anything about your documents..."
+                    : "Select a document first, then ask a question..."
                 }
                 rows={3}
                 onKeyDown={(event) => {
@@ -664,7 +730,6 @@ export default function App() {
                   <kbd>Enter</kbd> to ask · <kbd>Shift + Enter</kbd> for a
                   new line
                 </span>
-
                 <button
                   className="primary-button ask-button"
                   type="submit"
@@ -683,7 +748,6 @@ export default function App() {
             RAG-DocQA <span className="footer-dot">·</span> DOCUMENT
             INTELLIGENCE
           </span>
-
           <span>Powered by your indexed knowledge</span>
         </footer>
       </main>
