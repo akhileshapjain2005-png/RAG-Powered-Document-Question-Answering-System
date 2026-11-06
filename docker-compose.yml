@@ -8,11 +8,13 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: rag-docqa-backend
+    ports:
+      - "127.0.0.1:8000:8000"
 
     environment:
       - ENV=${ENV:-production}
       - ALLOW_ANONYMOUS_ACCESS=${ALLOW_ANONYMOUS_ACCESS:-false}
-      - ENABLE_API_DOCS=${ENABLE_API_DOCS:-false}
+      - ENABLE_API_DOCS=true
 
       # Embedding and vector database
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-all-MiniLM-L6-v2}
